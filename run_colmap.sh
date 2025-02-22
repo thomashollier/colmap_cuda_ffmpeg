@@ -21,6 +21,8 @@ OUTPUT_PATH=$(grep "^output_path=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r
 DATABASE_PATH=$(grep "^database_path=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r')
 VIDEO_PATH=$(grep "^video_path=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r')
 FPS=$(grep "^frames_per_second=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r')
+MATCHER_TYPE=$(grep "^matcher_type=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r')
+STOP_AT_SPARSE=$(grep "^stop_at_sparse=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r')
 
 # Check if video path is set and video exists
 if [ ! -z "$VIDEO_PATH" ] && [ -f "$VIDEO_PATH" ]; then
@@ -53,6 +55,7 @@ mkdir -p "$DENSE_PATH"
 echo "Using config file: $CONFIG_PATH"
 echo "Input path: $INPUT_PATH"
 echo "Output path: $OUTPUT_PATH"
+echo "Matcher type: $MATCHER_TYPE"
 echo "Starting COLMAP pipeline..."
 
 # Feature extraction
@@ -67,10 +70,19 @@ colmap feature_extractor \
 
 # Feature matching
 echo "2. Matching features..."
-colmap exhaustive_matcher \
-    --database_path "$DATABASE_PATH" \
-    --SiftMatching.gpu_index 0 \
-    --SiftMatching.use_gpu 1
+if [ "$MATCHER_TYPE" = "sequential" ]; then
+    echo "Using sequential matcher..."
+    colmap sequential_matcher \
+        --database_path "$DATABASE_PATH" \
+        --SiftMatching.gpu_index 0 \
+        --SiftMatching.use_gpu 1
+else
+    echo "Using exhaustive matcher..."
+    colmap exhaustive_matcher \
+        --database_path "$DATABASE_PATH" \
+        --SiftMatching.gpu_index 0 \
+        --SiftMatching.use_gpu 1
+fi
 
 # Sparse reconstruction
 echo "3. Running sparse reconstruction..."
@@ -78,6 +90,12 @@ colmap mapper \
     --database_path "$DATABASE_PATH" \
     --image_path "$INPUT_PATH" \
     --output_path "$SPARSE_PATH"
+
+if [ "$STOP_AT_SPARSE" = "true" ]; then
+    echo "Stopping after sparse reconstruction as requested."
+    echo "Sparse reconstruction can be found at: $SPARSE_PATH"
+    exit 0
+fi
 
 # Dense reconstruction
 echo "4. Running dense reconstruction..."
