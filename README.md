@@ -1,5 +1,5 @@
 # colmap_cuda_ffmpeg
-## Docker container for running COLMAP using CUDA and ffmpeg
+## Docker container for running COLMAP and GLOMAP using CUDA and ffmpeg
 
 ### Batch reconstruction from a bunch of movies
 You can use the process_movies.bsh to loop through all the mov files in a directory and automatically run the reconstruction process on all of them.
