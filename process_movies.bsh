@@ -1,0 +1,38 @@
+# Run sfm reconstructions on all the mov files in the $ROOT directory
+# ADirectories for the data are staged alongside the movie, and the copy of the
+# config files gets copied locally to the individual project.
+# The idea is you run the basic generic one but then can go back
+# tweak and re-run
+
+ROOT=/path/to/the/mov/directory
+source_init=//gth/to/the/source/config/glomap_config.ini
+
+
+for m in ${ROOT}/*mov
+
+do
+
+PROJECT=${m/.mov}
+IMAGES=${PROJECT}/images
+OUTPUT=${PROJECT}/output
+VIDEO=${PROJECT}/video
+CONFIG=${PROJECT}/glomap_config.ini
+
+mkdir -p $IMAGES
+mkdir -p $OUTPUT
+mkdir -p $VIDEO
+
+mv $m ${VIDEO}
+cat $source_init | sed "s/REPLACEME/$(basename ${m})/" > $CONFIG
+
+
+docker run --gpus all \
+  -v ${IMAGES}:/workspace/images \
+  -v ${OUTPUT}:/workspace/output \
+  -v ${VIDEO}:/workspace/video \
+  -v ${CONFIG}:/workspace/config/glomap_config.ini \
+  -e CONFIG_PATH=/workspace/config/glomap_config.ini \
+thomashollier/glomap_recon
+
+done
+
