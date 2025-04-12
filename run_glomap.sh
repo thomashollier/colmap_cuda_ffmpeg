@@ -30,6 +30,7 @@ NUM_THREADS=$(grep "^num_threads=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r
 SKIP_EXTRACTION=$(grep "^skip_extraction=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r' || echo "false")
 SKIP_MATCHING=$(grep "^skip_matching=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r' || echo "false")
 SKIP_MAPPING=$(grep "^skip_mapping=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r' || echo "false")
+SKIP_ALIGNMENT=$(grep "^skip_alignment=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r' || echo "false")
 USE_COLMAP_MAPPER=$(grep "^use_colmap_mapper=" "$CONFIG_PATH" | cut -d'=' -f2 | tr -d ' \t\r' || echo "false")
 
 # Function to execute command with echo
@@ -76,9 +77,11 @@ fi
 # Create output directories
 SPARSE_PATH="$OUTPUT_PATH/sparse"
 GLOMAP_PATH="$OUTPUT_PATH/glomap"
+ALIGNED_TMP_PATH="$OUTPUT_PATH/aligned_tmp"
 mkdir -p "$OUTPUT_PATH"
 mkdir -p "$SPARSE_PATH"
 mkdir -p "$GLOMAP_PATH"
+mkdir -p "$ALIGNED_TMP_PATH"
 
 echo "Using config file: $CONFIG_PATH"
 echo "Input path: $INPUT_PATH"
@@ -176,7 +179,7 @@ else
                 echo "GLOMAP reconstruction successful"
                 # Copy GLOMAP output to COLMAP sparse format for compatibility
                 echo "4. Converting GLOMAP output to COLMAP format..."
-                COPY_CMD="mkdir -p \"$SPARSE_PATH/0\" && cp -r \"$GLOMAP_PATH/\"* \"$SPARSE_PATH/0/\" 2>/dev/null || true"
+                COPY_CMD="mkdir -p \"$SPARSE_PATH/0\" && cp -r \"$GLOMAP_PATH/0/\"* \"$SPARSE_PATH/0/\" 2>/dev/null || true"
                 execute_command "$COPY_CMD" "Converting GLOMAP output to COLMAP format"
             else
                 echo "GLOMAP reconstruction failed or produced no output. Falling back to COLMAP mapper..."
@@ -198,6 +201,60 @@ else
     fi
 fi
 
+# STEP 4: Align the sparse reconstruction to main axes
+if [ "$SKIP_ALIGNMENT" = "true" ]; then
+    echo "SKIPPED: Orientation alignment (skip_alignment=true)"
+else
+    echo "4. Aligning reconstruction to main axes..."
+    
+    # Find the largest model in the sparse directory
+    RECONSTRUCTION_PATH=""
+    if [ -d "$SPARSE_PATH" ]; then
+        # Check if there is a numbered subdirectory (COLMAP style)
+        if [ -d "$SPARSE_PATH/0" ]; then
+            RECONSTRUCTION_PATH="$SPARSE_PATH/0"
+        else
+            # Check if files are directly in the sparse directory
+            if [ -f "$SPARSE_PATH/cameras.bin" ] || [ -f "$SPARSE_PATH/cameras.txt" ]; then
+                RECONSTRUCTION_PATH="$SPARSE_PATH"
+            fi
+        fi
+    fi
+    
+    if [ -z "$RECONSTRUCTION_PATH" ] || [ ! -d "$RECONSTRUCTION_PATH" ]; then
+        echo "Error: No valid reconstruction found to align"
+    else
+        echo "Found reconstruction at: $RECONSTRUCTION_PATH"
+        
+        # Run the model_orientation_aligner to align to main axes
+        ALIGN_CMD="colmap model_orientation_aligner \\
+            --input_path \"$RECONSTRUCTION_PATH\" \\
+            --output_path \"$ALIGNED_TMP_PATH\" \\
+            --image_path \"$INPUT_PATH\""
+        
+        # Execute the alignment command
+        if execute_command "$ALIGN_CMD" "Model orientation alignment"; then
+            echo "Alignment successful. Replacing original reconstruction with aligned one..."
+            
+            # Backup original reconstruction
+            BACKUP_PATH="$SPARSE_PATH/original_backup"
+            mkdir -p "$BACKUP_PATH"
+            
+            # Copy original to backup
+            BACKUP_CMD="cp -r \"$RECONSTRUCTION_PATH/\"* \"$BACKUP_PATH/\""
+            execute_command "$BACKUP_CMD" "Backing up original reconstruction"
+            
+            # Move aligned reconstruction to original location
+            REPLACE_CMD="cp -f \"$ALIGNED_TMP_PATH/\"* \"$RECONSTRUCTION_PATH/\""
+            execute_command "$REPLACE_CMD" "Replacing with aligned reconstruction"
+            
+            echo "Alignment and replacement complete"
+        else
+            echo "Alignment failed. Keeping original reconstruction."
+        fi
+    fi
+fi
+
 echo -e "\n------------------------------------------"
 echo "Sparse reconstruction process complete!"
 echo "------------------------------------------"
@@ -212,6 +269,10 @@ if [ -d "$GLOMAP_PATH" ] && [ "$(ls -A "$GLOMAP_PATH")" ]; then
     echo "- GLOMAP output: $GLOMAP_PATH"
 else
     echo "- GLOMAP output: Not created or empty"
+fi
+
+if [ -d "$SPARSE_PATH/original_backup" ] && [ "$(ls -A "$SPARSE_PATH/original_backup")" ]; then
+    echo "- Original unaligned backup: $SPARSE_PATH/original_backup"
 fi
 
 # Print disk usage information for the output directories
